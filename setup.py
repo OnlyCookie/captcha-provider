@@ -13,6 +13,6 @@ setup(
     description='Simple captcha solver with that support multiple sources.',
     install_requires=[
         'requests >= 2.29.0,<3',
-        'proxy-provider @ git+ssh://git@github.com/OnlyCookie/proxy-provider.git'
+        'proxy-provider @ git+ssh://git@github.com/OnlyCookie/proxy-provider.git@feature-2captcha-improvement'
     ]
 )
