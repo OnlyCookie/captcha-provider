@@ -1,10 +1,11 @@
 import requests
 import time
 from . import capsolverconstants as const
-from .base import BaseHCaptchaResult
+from .base import BaseHCaptchaResult, BaseImageCaptchaResult
 from proxy import ProxyConfig
 from abc import ABC, abstractmethod
 from typing import Optional, TypeVar
+from base64 import b64encode
 
 CapSolverResultT = TypeVar('CapSolverResultT', bound='CapSolverResul')
 
@@ -49,7 +50,19 @@ class CapSolverGenerator(ABC):
         self.website_url: str = website_url
         self.max_auto_retry: int = max_auto_retry
 
-    def _create_task(self, task_body: dict) -> str:
+    @abstractmethod
+    def _process_solution(self, raw_solution: dict) -> CapSolverResult:
+        pass
+
+    def _create_task(self, task_body: dict) -> dict:
+        """
+        Creates a task on capsolver with the task body provided. The `task_body` dictionary will be used as the value
+        for `task` (see CapSolver docs). If the response does not have any error, the response will be returned as is
+        in a dictionary format.
+
+        :param task_body: Task information to be placed in `task` section of the request json.
+        :return: Response of the request as is in.
+        """
         if const.CAP_SOLVER_TASK_KEY_WEBSITE_URL not in task_body:
             task_body[const.CAP_SOLVER_TASK_KEY_WEBSITE_URL] = self.website_url
 
@@ -70,6 +83,12 @@ class CapSolverGenerator(ABC):
         if response_id != 0:
             error_code = response_json[const.CAP_SOLVER_RESPONSE_KEY_ERROR_CODE]
             raise (CapSolverRequestFailed(f'Task create did not return error id of 0. Error code: {error_code}'))
+        pass
+
+        return response_json
+
+    def _create_async_task(self, task_body: dict) -> str:
+        response_json = self._create_task(task_body)
 
         return response_json[const.CAP_SOLVER_REQUEST_KEY_TASK_ID]
 
@@ -97,16 +116,17 @@ class CapSolverGenerator(ABC):
 
         return response_json.get(const.CAP_SOLVER_RESPONSE_KEY_SOLUTION)
 
-    @abstractmethod
-    def _process_solution(self, raw_solution: dict) -> CapSolverResult:
-        pass
+    def _get_instant_solution(self, task_body: dict) -> CapSolverResult:
+        response_json = self._create_task(task_body)
 
-    def _get_solution(self, task_body: dict) -> CapSolverResultT:
+        return self._process_solution(response_json.get(const.CAP_SOLVER_RESPONSE_KEY_SOLUTION))
+
+    def _get_async_solution(self, task_body: dict) -> CapSolverResultT:
         # TODO: Better retry handling
         solution: Optional[dict] = None
 
         while solution is None:
-            task_id = self._create_task(task_body)
+            task_id = self._create_async_task(task_body)
             print(f'Task created. Id: {task_id}')
 
             while True:
@@ -149,7 +169,7 @@ class CapSolverHCaptchaGenerator(CapSolverGenerator):
         captcha_type = const.CAP_SOLVER_TASK_TYPE_H_CAPTCHA
         task_body = dict()
 
-        task_body[const.CAP_SOLVER_TASK_H_CAPTCHA_SITE_KEY] = site_key
+        task_body[const.CAP_SOLVER_TASK_KEY_WEBSITE_URL] = site_key
         
         if captcha_proxy is not None:
             captcha_type = const.CAP_SOLVER_TASK_TYPE_H_CAPTCHA_PROXY
@@ -160,4 +180,30 @@ class CapSolverHCaptchaGenerator(CapSolverGenerator):
 
         task_body[const.CAP_SOLVER_TASK_KEY_CAPTCHA_TYPE] = captcha_type
 
-        return self._get_solution(task_body)
+        return self._get_async_solution(task_body)
+
+
+class CapSolverImageCaptchaGenerator(CapSolverGenerator):
+    def __init__(self, api_key: str, website_url: str, module: str, max_auto_retry: int = 0):
+        self.module = module
+
+        super().__init__(api_key, website_url, max_auto_retry=max_auto_retry)
+
+    def _process_solution(self, raw_solution: dict) -> CapSolverResult:
+        return CapSolverResult(raw_solution)
+
+    def generate_from_binary(self, image_binary: bytes) -> BaseImageCaptchaResult:
+        image_base64 = b64encode(image_binary)
+        print(image_base64)
+
+        task_body = {
+            const.CAP_SOLVER_TASK_KEY_CAPTCHA_TYPE: const.CAP_SOLVER_TASK_TYPE_IMAGE,
+            const.CAP_SOLVER_TASK_KEY_WEBSITE_URL: self.website_url,
+            const.CAP_SOLVER_TASK_KEY_IMAGE_MODULE: self.module,
+            const.CAP_SOLVER_TASK_KEY_IMAGE_BODY: image_base64.decode('utf-8', errors='ignore')
+        }
+
+        captcha_result = self._get_instant_solution(task_body)
+        raw_solution = captcha_result.raw_solution
+
+        return BaseImageCaptchaResult(text=raw_solution.get(const.CAP_SOLVER_RESPONSE_IMAGE_CAPTCHA_TEXT), confidence=raw_solution.get('confidence'))

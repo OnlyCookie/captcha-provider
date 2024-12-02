@@ -1,6 +1,7 @@
 import requests
 from proxy import ProxyConfig
-from typing import Protocol
+from typing import Protocol, Optional
+from dataclasses import dataclass
 
 
 class BaseFunCaptchaResult:
@@ -47,3 +48,26 @@ class BaseHCaptchaGenerator(Protocol):
         pass
 
 
+@dataclass(frozen=True)
+class BaseImageCaptchaResult:
+    text: str
+    """Resolved text of the captcha"""
+
+    task_id: Optional[str] = None
+    """(Optional) Task ID related to the submitted job/task."""
+
+    confidence: Optional[str] = None
+    """(Optional) Confidence of the result."""
+
+
+class BaseImageCaptchaGenerator(Protocol):
+
+    def generate_from_binary(self, image_binary: bytes) -> BaseImageCaptchaResult:
+        """
+        The implementation must accept a captcha image as a binary, solves the captcha and return the captcha result as
+        :class:`BaseImageCaptchaResult` object.
+
+        :param image_binary: Binary of the image.
+        :return: Result of the captcha.
+        """
+        pass
